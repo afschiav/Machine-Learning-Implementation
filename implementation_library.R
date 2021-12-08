@@ -21,6 +21,7 @@
 #-Principal Component Analysis (PCA)
 #-Multidimensional Scaling (MDS) & Principal Coordinate Analysis (PCoA)
 #-t-SNE
+#-Linear Discriminant Analysis 
 
 #MIXTURE MODELS
 #-Univarite
@@ -463,8 +464,11 @@
 #Resources
 {
   #Prinicapl cmponent analysis: https://www.youtube.com/watch?v=FgakZw6K1QQ&ab_channel=StatQuestwithJoshStarmer
+  #PCA in R: https://www.youtube.com/watch?v=0Jp4gsfOLMs&ab_channel=StatQuestwithJoshStarmer 
+  #MDS and PCoA: https://www.youtube.com/watch?v=GEn-_dAyYME&ab_channel=StatQuestwithJoshStarmer 
+  #t-SNE: https://www.youtube.com/watch?v=NEaUSP4YerM&ab_channel=StatQuestwithJoshStarmer
+  
 }
-
 
 #Principal Component Analysis (PCA)
 {
@@ -493,10 +497,236 @@
   
   #Using Scree plot, we can select the one or two most important PC(s) and plot them. This gives visualization of data clusters in lower dimensions!
   
+  #EXAMPLE:
+  library(ggplot2)
+  
+  #generate data
+  {
+    data.matrix<-matrix(nrow=100, ncol=10)
+    colnames(data.matrix)<-c(paste("wt", 1:5, sep=""),
+                             paste("ko", 1:5, sep=""))
+    rownames(data.matrix)<-paste("gene", 1:100, sep="")
+    for (i in 1:100) {
+      wt.values <- rpois(5, lambda=sample(x=10:1000, size=1))
+      ko.values <- rpois(5, lambda=sample(x=10:1000, size=1))
+      
+      data.matrix[i,] <- c(wt.values, ko.values)
+    }
+  }
+  
+  pca<-prcomp(t(data.matrix), scale=TRUE)#run PCA
+    #Note: by default, prcomp() expects the samples to be rows and the genes to be columns. Hence the t() transpose
+    #prcomp() returns three things:
+    #   1) x: contains the PCs for drawing a graph
+    #   2) sdev
+    #   3) rotation
+  
+  plot(pca$x[,1], pca$x[,2]) #plot first two (of ten) PCs 
+  
+  pca.var<-pca$sdev^2 #use square of sdev (standard deviation) to calculate how much variation in the original data each component accounts for.
+  pca.var.per<-round(pca.var/sum(pca.var)*100,1) #compute percentage of variation
+  
+  barplot(pca.var.per, main = "Scree Plot", xlab="Principal Component", ylab="Percent Variation")#generate Skree plot
+      #Based on Skree plot, it seems that most of the variation in the data is accounted for by PC1.
+      #Thus, a two-dimensional PCA plot does a good job visualizing data clusters
+  
+  pca.data <- data.frame(Sample=rownames(pca$x),  #now make a fancy looking plot that shows the PCs and the variation:
+                         X=pca$x[,1],
+                         Y=pca$x[,2])
+  
+  ggplot(data=pca.data, aes(x=X, y=Y, label=Sample)) +
+    geom_text() +
+    xlab(paste("PC1 - ", pca.var.per[1], "%", sep="")) +
+    ylab(paste("PC2 - ", pca.var.per[2], "%", sep="")) +
+    theme_bw() +
+    ggtitle("My PCA Graph")
+  
+  #Finally, use loadfing scores to determine which genes have the largest effect on where samples are plotted in the PCA plot:
+  loading_scores<-pca$rotation[,1]
+    #prcomp() calls the loading scores "rotation"
+  
+  gene_scores<-abs(loading_scores) #get absolute value of loading scores (because interested in |large values|)
+  gene_scores_ranked<-sort(gene_scores, decreasing=TRUE) #rank genes
+  top_10_genes<-names(gene_scores_ranked[1:10]) #print top 10 genes in order of their importance in PC1
+  top_10_genes
+  
+  rm(list=ls())
   
 }
 
+#Multidimensional Scaling (MDS) & Principal Coordinate Analysis (PCoA)
+{
+  #NOTE: this section talks only about Classical MDS. Classical MDS <=> PCoA.
+  #MDS/PCoA are very similar to PCA, except that instead of converting correlations into a 2D graph, 
+  #they convert distances among the samples into a 2D graph.
+  #Key difference: PCA creates plots based on correlations between samples, MDS/PCoA creates plots based on distances among samples!
+  #Need to calculate the distance between samples. Using Euclidean distance results in PCA plot!
+  #Instead of Euclidean distance, can use mean log-fold changes: mean(abs(log(ratio of variable values for two samples)))
+  #There are lots of distances to choose from: Manhattan Distance, Hamming Distance, Great Circle Distance, etc.
+  #Selecting the best distance is the challenge
 
+  #EXAMPLE:
+  library(ggplot2)
+  
+  #generate data
+  {
+    data.matrix<-matrix(nrow=100, ncol=10)
+    colnames(data.matrix)<-c(paste("wt", 1:5, sep=""),
+                             paste("ko", 1:5, sep=""))
+    rownames(data.matrix)<-paste("gene", 1:100, sep="")
+    for (i in 1:100) {
+      wt.values <- rpois(5, lambda=sample(x=10:1000, size=1))
+      ko.values <- rpois(5, lambda=sample(x=10:1000, size=1))
+      
+      data.matrix[i,] <- c(wt.values, ko.values)
+    }
+  }
+  
+  #Step 1: create distance matrix
+  distance.matrix<-dist(scale(t(data.matrix), center=TRUE, scale=TRUE), method="euclidean")
+      #Note: by default, dist() expects the samples to be rows and the genes to be columns. Hence the t() transpose
+      #Center and scale the measurements for each gene (column)
+      #Finally, tell dist() to use Euclidean distance.
+      #Note: using Euclidean distance will result in the same as PCA
+  
+  #Step 2: perform multidimensional scaling on the distance matrix
+  mds.stuff<-cmdscale(distance.matrix, eig=TRUE, x.ret = TRUE)
+    #eig=TRUE => return the eigen values. Use these to calculate how much variation in the distance matrix each axis in the final plot accounts for
+    #x.ret=TRUE => return doubly centered (rows and columns) version of the distance matrix
+  
+  #Step 3: calculate the amount of variation each axis in the MDS plot accounts for using the eigen values
+  mds.var.per<-round(mds.stuff$eig/sum(mds.stuff$eig)*100, 1)
+  
+  #Step 4: format the data for ggplot
+  mds.values <- mds.stuff$points
+  mds.data <- data.frame(Sample=rownames(mds.values),
+                         X=mds.values[,1],
+                         Y=mds.values[,2])
+  ggplot(data=mds.data, aes(x=X, y=Y, label=Sample)) +
+    geom_text() +
+    theme_bw() +
+    xlab(paste("MDS1 - ", mds.var.per[1], "%", sep="")) +
+    ylab(paste("MDS2 - ", mds.var.per[2], "%", sep="")) +
+    ggtitle("MDS plot using Euclidean distance")
+  
+  
+  #NOTE: the MDS plot here is the same as PCA because it uses Euclidean distance!! Use other metrics to see different results
+  
+  
+  #Now draw an MDS plot using the same data and the average log(fold change) 
+
+
+  ## first, take the log2 of all the values in the data.matrix.
+  ## This makes it easy to compute log2(Fold Change) between a gene in two
+  ## samples since...
+  ##
+  ## log2(Fold Change) = log2(value for sample 1) - log2(value for sample 2)
+  ##
+  log2.data.matrix <- log2(data.matrix)
+  
+  ## now create an empty distance matrix
+  log2.distance.matrix <- matrix(0,
+                                 nrow=ncol(log2.data.matrix),
+                                 ncol=ncol(log2.data.matrix),
+                                 dimnames=list(colnames(log2.data.matrix),
+                                               colnames(log2.data.matrix)))
+  
+  log2.distance.matrix
+  
+  ## now compute the distance matrix using avg(absolute value(log2(FC)))
+  for(i in 1:ncol(log2.distance.matrix)) {
+    for(j in 1:i) {
+      log2.distance.matrix[i, j] <-
+        mean(abs(log2.data.matrix[,i] - log2.data.matrix[,j]))
+    }
+  }
+  log2.distance.matrix
+  
+  ## do the MDS math (this is basically eigen value decomposition)
+  ## cmdscale() is the function for "Classical Multi-Dimensional Scalign"
+  mds.stuff <- cmdscale(as.dist(log2.distance.matrix),
+                        eig=TRUE,
+                        x.ret=TRUE)
+  
+  ## calculate the percentage of variation that each MDS axis accounts for...
+  mds.var.per <- round(mds.stuff$eig/sum(mds.stuff$eig)*100, 1)
+  mds.var.per
+  
+  ## now make a fancy looking plot that shows the MDS axes and the variation:
+  mds.values <- mds.stuff$points
+  mds.data <- data.frame(Sample=rownames(mds.values),
+                         X=mds.values[,1],
+                         Y=mds.values[,2])
+  mds.data
+  
+  ggplot(data=mds.data, aes(x=X, y=Y, label=Sample)) +
+    geom_text() +
+    theme_bw() +
+    xlab(paste("MDS1 - ", mds.var.per[1], "%", sep="")) +
+    ylab(paste("MDS2 - ", mds.var.per[2], "%", sep="")) +
+    ggtitle("MDS plot using avg(logFC) as the distance")
+  
+  rm(list=ls())
+
+}
+
+#t-SNE
+{
+  #SNE=Stochastic Neighbor Embedding. t=t distribution used.
+  
+  #t-SNE takes a high dimensional dataset and reduces it to a lower dimensional graph while
+  #retaining much of the original information and clustering
+  
+  #Step 1: determine the "similarity" of all the points in a high dimensional dataset
+  #    (i) select a data point
+  #    (ii) calculate the distance from that selected point to all other points
+  #    (iii) plot that distance on a normal curve that is centered on the selected data point
+  #    (iv) draw a line from the point to the normal curve. This is the "unscaled similarity". Points with large distance have low similarity 
+  #    (v) scale unscaled similarities so they add up to 1; scaled score=score/sum of scores. This is important such that similarity is comparable between different selected points
+  #    (vi) repeat process for all points
+  #    (vii) generate similarity score matrix 
+  
+  #Step 2: randomly project points onto a number line (or reduced dimensional space)
+  
+  #Step 3: compute similarity of points on the number line similar to before, this time using a t-dist (hence the "t" in t-SNE)
+  
+  #Step 4: generate similarity score matrix for points in the reduced dimensional space
+  
+  #Step 5: in reduced dimensional space, move points a little bit at a time in the direction that makes the 
+  #        reduced dimensional similarity matrix more similar to the original similarity matrix
+  
+  
+  #EXAMPLE:
+  library(Rtsne) #t-SNE package
+  library(Rcpp) #needed to enable C++ wrapper functions
+  #generate data
+  {
+    data.matrix<-matrix(nrow=100, ncol=10)
+    colnames(data.matrix)<-c(paste("wt", 1:5, sep=""),
+                             paste("ko", 1:5, sep=""))
+    rownames(data.matrix)<-paste("gene", 1:100, sep="")
+    for (i in 1:100) {
+      wt.values <- rpois(5, lambda=sample(x=10:1000, size=1))
+      ko.values <- rpois(5, lambda=sample(x=10:1000, size=1))
+      
+      data.matrix[i,] <- c(wt.values, ko.values)
+    }
+  }
+  
+  tsne<-Rtsne(t(data.matrix), perplexity = 2)
+  
+  
+  
+  
+}
+
+#Linear Discriminant Analysis (LDA)
+{
+  #Maximizes separation between classes and minimizes variances between classes for a labeled dataset
+  #LDA is like PCA in that it reduces dimensions, but it focuses on maximizing the seperability among known categories
+  #LDA uses information from all dimensions to form new axis/axes and projects data onto this/these new axis/axes in a way to maximize separation of the two categories
+  
+}
 
 #####MIXTURE MODELS####
 
